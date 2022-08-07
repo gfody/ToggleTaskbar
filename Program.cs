@@ -1,9 +1,40 @@
 ﻿using System;
 using System.Drawing;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 class Program
 {
+    static void Main(string[] args)
+    {
+        bool vanish = args.Contains("-x"), show = args.Contains("-v"), hide = args.Contains("-h");
+        bool toggle = !(show ^ hide);
+        var trayWindow = FindWindow("Shell_TrayWnd", null);
+        var trayVisible = IsWindowVisible(trayWindow);
+        var trayData = new APPBARDATA { cbSize = Marshal.SizeOf(typeof(APPBARDATA)) };
+        var trayState = SHAppBarMessage(ABM_GETSTATE, ref trayData);
+
+        if ((toggle | show) && ((trayState & ABS_AUTOHIDE) > 0 || (vanish && !trayVisible)))
+        {
+            ShowWindow(trayWindow, SW_SHOW);
+            trayData.lParam = trayState & ~ABS_AUTOHIDE;
+            SHAppBarMessage(ABM_SETSTATE, ref trayData);
+        }
+        else if ((toggle | hide) && ((trayState & ABS_AUTOHIDE) == 0 || (vanish && trayVisible)))
+        {
+            trayData.lParam = trayState | ABS_AUTOHIDE;
+            SHAppBarMessage(ABM_SETSTATE, ref trayData);
+            if (vanish)
+                ShowWindow(trayWindow, SW_HIDE);
+            else
+            {
+                GetCursorPos(out var cursor);
+                SetForegroundWindow(WindowFromPoint(cursor)); // deactivate taskbar to trigger autohide
+            }
+        }
+    }
+
+    #region winuser.h, shellapi.h
     [StructLayout(LayoutKind.Sequential)]
     struct APPBARDATA
     {
@@ -36,25 +67,5 @@ class Program
     static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32")]
     static extern bool IsWindowVisible(IntPtr hWnd);
-
-    static void Main(string[] args)
-    {
-        GetCursorPos(out var cursor);
-        var someWindow = WindowFromPoint(cursor);
-        var trayWindow = FindWindow("Shell_TrayWnd", null);
-        if (args.Length > 0 && !IsWindowVisible(trayWindow))
-            ShowWindow(trayWindow, SW_SHOW);
-
-        var data = new APPBARDATA { cbSize = Marshal.SizeOf(typeof(APPBARDATA)) };
-        data.lParam = SHAppBarMessage(ABM_GETSTATE, ref data) == ABS_AUTOHIDE ? ABS_ALWAYSONTOP : ABS_AUTOHIDE;
-        SHAppBarMessage(ABM_SETSTATE, ref data);
-
-        if (data.lParam == ABS_AUTOHIDE)
-        {
-            if (args.Length > 0)
-                ShowWindow(trayWindow, SW_HIDE);
-            else
-                SetForegroundWindow(someWindow); // deactivate taskbar to trigger autohide
-        }
-    }
+    #endregion
 }
